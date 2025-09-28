@@ -96,7 +96,6 @@ void ADS1256::writeRegister(uint8_t reg, uint8_t value)
   _spi.transfer(0x00);                   // Number of registers to write - 1
   _spi.transfer(value);                  // Send data
   digitalWrite(_cs_pin, HIGH);           // Pull CS high
-  waitForDRDY();                         // Wait for DRDY to go low after write
   _spi.endTransaction();
   delayMicroseconds(t11a*tau);           // t11 in datasheet
 }
@@ -110,7 +109,6 @@ uint8_t ADS1256::readRegister(uint8_t reg)
   delayMicroseconds(t6);                 // t6 in datasheet
   uint8_t value = _spi.transfer(0xFF);   // Read data (8bits) by sending dummy byte
   digitalWrite(_cs_pin, HIGH);           // Pull CS high
-  waitForDRDY();                         // Wait for DRDY to go low indicating readiness
   _spi.endTransaction();
   delayMicroseconds(t11a*tau);           // t11 in datasheet
   return value;
@@ -119,14 +117,12 @@ uint8_t ADS1256::readRegister(uint8_t reg)
 void ADS1256::reset()
 {
   _spi.beginTransaction(SPISettings(SPI_SPEED, MSBFIRST, SPI_MODE1)); // initialize SPI with  clock, MSB first, SPI Mode1
-
-  // Send the reset command to the ADS1256
   digitalWrite(_cs_pin, LOW);           // Pull CS low
   _spi.transfer(ADS1256_CMD_RESET);     // Send RESET command
   digitalWrite(_cs_pin, HIGH);         // Pull CS high
   _spi.endTransaction();
-  waitForDRDY();
-  while (digitalRead(_drdy_pin) == HIGH); // Ensure DRDY is low
+  delay(10); // Give time to the reset to start
+  while (digitalRead(_drdy_pin) == HIGH); // It's mandatory to wait for DRDY to go low after a reset
 }
 
 void ADS1256::updatePGAGainValue()
@@ -160,7 +156,33 @@ void ADS1256::updatePGAGainValue()
     }
 }
 
+int32_t ADS1256::readRawData() {
+  waitForDRDY();
+  _spi.beginTransaction(SPISettings(SPI_SPEED, MSBFIRST, SPI_MODE1));
+  digitalWrite(_cs_pin, LOW);
+  _spi.transfer(ADS1256_CMD_RDATA);
+  delayMicroseconds(t6*tau); 
 
+  uint32_t result = 0;
+  result |= (uint32_t)_spi.transfer(0x00) << 16; // MSB
+  result |= (uint32_t)_spi.transfer(0x00) << 8;  // Mid-Byte
+  result |= (uint32_t)_spi.transfer(0x00);       // LSB
+
+  digitalWrite(_cs_pin, HIGH);
+  _spi.endTransaction();
+
+  // Manage negative values (two's complement)
+  if (result & 0x00800000) {
+    result |= 0xFF000000; 
+  }
+
+  return (int32_t)result;
+}
+
+float ADS1256::convertToVoltage(int32_t rawData) {
+    // La formule est : Voltage = (Valeur_ADC / Résolution) * (Plage_de_tension / Gain)
+    return (float)rawData / ADS1256_MAX_VALUE * (_vref_volts * 2.0) / _current_pga_gain_value;
+}
 
 
 

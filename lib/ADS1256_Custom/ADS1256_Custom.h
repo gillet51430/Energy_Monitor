@@ -97,6 +97,9 @@ public:
     void printRegister(const char *regName, uint8_t regValue, bool lrlf);
     void printAllRegisters();
 
+    int32_t readRawData();
+    float convertToVoltage(int32_t rawData);
+
 private:
     // --- Broches et configuration ---
     uint8_t _cs_pin;

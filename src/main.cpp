@@ -36,15 +36,21 @@ void setup() {
   ADS1256_SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI, -1);
 
   adc.begin();
-  delay(1000);
+  delay(500);
   adc.reset();
   // delay(1000);
 
+  Serial.println("Registres avant configuration :");
   adc.printAllRegisters();
 
-  adc.writeRegister(ADS1256_REG_STATUS, ADS1256_STATUS_BUFFER_ENABLE | ADS1256_STATUS_AUTOCAL_DISABLE);
+  
   adc.writeRegister(ADS1256_REG_MUX, 0x10);
+  adc.writeRegister(ADS1256_REG_ADCON, ADS1256_ADCON_PGA_1);
+  adc.writeRegister(ADS1256_REG_STATUS, ADS1256_STATUS_BUFFER_ENABLE | ADS1256_STATUS_AUTOCAL_DISABLE);
 
+  adc.reset();
+
+  Serial.println("\nRegistres après configuration et calibration :");
   adc.printAllRegisters();
 
   Serial.println("--------------------------------------------------");
@@ -53,5 +59,15 @@ void setup() {
 }
 
 void loop() {
+  // Lire la valeur brute de la conversion
+  int32_t raw_adc = adc.readRawData();
 
+  // Convertir la valeur brute en tension
+  float voltage = adc.convertToVoltage(raw_adc);
+
+  // Afficher les résultats sur le moniteur série
+  Serial.printf("Valeur brute (AIN0-AIN1): %d | Tension: %.3f V\n", raw_adc, voltage);
+
+
+  delay(500); // Pause de 500ms entre les mesures
 }
