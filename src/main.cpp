@@ -33,19 +33,19 @@ void setup() {
   Serial.begin(115200);
   while (!Serial);  
 
+  ADS1256_SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI, -1);
+
   adc.begin();
   delay(1000);
   adc.reset();
-  delay(1000);
+  // delay(1000);
+
+  adc.printAllRegisters();
 
   adc.writeRegister(ADS1256_REG_STATUS, ADS1256_STATUS_BUFFER_ENABLE | ADS1256_STATUS_AUTOCAL_DISABLE);
   adc.writeRegister(ADS1256_REG_MUX, 0x10);
 
-  Serial.println("\n--- Reading Initial Register Values ---");
-  adc.printRegister("STATUS", adc.readRegister(ADS1256_REG_STATUS) & 0x0F, true); // Mask reserved bits
-  adc.printRegister("MUX", adc.readRegister(ADS1256_REG_MUX), true);
-  adc.printRegister("ADCON", adc.readRegister(ADS1256_REG_ADCON), true);
-  adc.printRegister("DRATE", adc.readRegister(ADS1256_REG_DRATE), true);
+  adc.printAllRegisters();
 
   Serial.println("--------------------------------------------------");
   Serial.println("Configuration terminée. Début des mesures...");
@@ -53,5 +53,5 @@ void setup() {
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
+
 }

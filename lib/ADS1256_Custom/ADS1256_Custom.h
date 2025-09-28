@@ -89,29 +89,13 @@ public:
      */
     ADS1256(uint8_t cs_pin, uint8_t drdy_pin, uint8_t pdwn_pin, double vref_volts, SPIClass& spi);
 
-    /**
-     * @brief Initialise le composant et attache l'interruption.
-     */
     void begin();
     void reset();
     void writeRegister(uint8_t reg, uint8_t value);
     uint8_t readRegister(uint8_t reg);
-
-
     String binaryToString(uint8_t val);
     void printRegister(const char *regName, uint8_t regValue, bool lrlf);
     void printAllRegisters();
-
-
-    /**
-     * @brief Vérifie si une nouvelle donnée est prête à être lue.
-     * Cette fonction réinitialise l'indicateur après l'avoir lu.
-     * @return true si une donnée est prête, false sinon.
-     */
-    bool isDataReady();
-
-    // Tu ajouteras ici tes autres méthodes publiques (ex: readADC(), setGain(), etc.)
-
 
 private:
     // --- Broches et configuration ---
@@ -121,8 +105,9 @@ private:
     double _vref_volts;
     SPIClass& _spi;
 
-    // --- État interne ---
-    
+    uint8_t _current_pga_gain_code;     // Stores the current PGA setting code (e.g., ADS1256_ADCON_PGA_1)
+    double _current_pga_gain_value;     // Stores the actual gain value (e.g., 1.0, 2.0, 4.0)
+
     /**
      * @brief Indicateur de donnée prête.
      * 'volatile' est CRUCIAL pour que le compilateur ne fasse pas d'optimisations
@@ -137,6 +122,9 @@ private:
      * @param arg Pointeur vers l'instance de la classe ('this').
      */
     static void IRAM_ATTR checkDReady_ISR(void* arg);
+    
+    void waitForDRDY();
+    void updatePGAGainValue();
 };
 
 #endif // ADS1256_CUSTOM_H
