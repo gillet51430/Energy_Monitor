@@ -99,6 +99,11 @@ public:
 
     int32_t readRawData();
     float convertToVoltage(int32_t rawData);
+    void setPGA(uint8_t pga_gain_code);
+    void setBuffer(bool enable);
+    void setAutoCalibration(bool enable);
+
+    void differentialChannelValue(uint8_t channelN, uint8_t channelP);
 
 private:
     // --- Broches et configuration ---

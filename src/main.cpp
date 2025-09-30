@@ -43,10 +43,10 @@ void setup() {
   Serial.println("Registres avant configuration :");
   adc.printAllRegisters();
 
-  
-  adc.writeRegister(ADS1256_REG_MUX, 0x10);
-  adc.writeRegister(ADS1256_REG_ADCON, ADS1256_ADCON_PGA_1);
-  adc.writeRegister(ADS1256_REG_STATUS, ADS1256_STATUS_BUFFER_ENABLE | ADS1256_STATUS_AUTOCAL_DISABLE);
+  adc.differentialChannelValue(ADS1256_MUX_AIN0, ADS1256_MUX_AIN1);
+  adc.setBuffer(true);
+  adc.setAutoCalibration(true);
+  adc.setPGA(ADS1256_ADCON_PGA_1);
 
   adc.reset();
 
@@ -66,7 +66,7 @@ void loop() {
   float voltage = adc.convertToVoltage(raw_adc);
 
   // Afficher les résultats sur le moniteur série
-  Serial.printf("Valeur brute (AIN0-AIN1): %d | Tension: %.3f V\n", raw_adc, voltage);
+  Serial.printf("Channel 1: %.4f V | Channel 2: %.4f V | Channel 3: %.4f V | Channel 4: %.4f V\n", voltage, 0.0, 0.0, 0.0);
 
 
   delay(500); // Pause de 500ms entre les mesures

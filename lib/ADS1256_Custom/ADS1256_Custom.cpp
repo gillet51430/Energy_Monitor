@@ -8,7 +8,7 @@
 
 // Define the Clock rate
 #define f_CLKIN 7.68 // in MHz
-#define tau 1.3021e-7 // in s (typical value from datasheet 1-f_CLKIN)
+#define tau 130.21 // in s (typical value from datasheet 1-f_CLKIN)
 
 // define waiting values from the datasheet
 #define t6 5     // Delay to wait when reading a registry
@@ -157,11 +157,11 @@ void ADS1256::updatePGAGainValue()
 }
 
 int32_t ADS1256::readRawData() {
-  waitForDRDY();
   _spi.beginTransaction(SPISettings(SPI_SPEED, MSBFIRST, SPI_MODE1));
+  waitForDRDY();
   digitalWrite(_cs_pin, LOW);
   _spi.transfer(ADS1256_CMD_RDATA);
-  delayMicroseconds(t6*tau); 
+  delayMicroseconds(t6*tau*2); 
 
   uint32_t result = 0;
   result |= (uint32_t)_spi.transfer(0x00) << 16; // MSB
@@ -184,9 +184,49 @@ float ADS1256::convertToVoltage(int32_t rawData) {
     return (float)rawData / ADS1256_MAX_VALUE * (_vref_volts * 2.0) / _current_pga_gain_value;
 }
 
+void ADS1256::setPGA(uint8_t pga_gain_code) {
+  uint8_t adcon_value = readRegister(ADS1256_REG_ADCON);
+  
+  adcon_value &= 0xF8;
+  adcon_value |= pga_gain_code;
+  writeRegister(ADS1256_REG_ADCON, adcon_value);
+  _current_pga_gain_code = pga_gain_code;
+  updatePGAGainValue(); // Cette fonction met à jour _current_pga_gain_value
+  reset(); // Reset the ADC to apply the new PGA setting
+}
 
+void ADS1256::setBuffer(bool enable) {
+  uint8_t status_value = readRegister(ADS1256_REG_STATUS);
 
+  if (enable) {
+    status_value |= ADS1256_STATUS_BUFFER_ENABLE;
+  } else {
+    status_value &= ~ADS1256_STATUS_BUFFER_ENABLE;
+  }
 
+  writeRegister(ADS1256_REG_STATUS, status_value);
+}
+
+void ADS1256::setAutoCalibration(bool enable) {
+  uint8_t status_value = readRegister(ADS1256_REG_STATUS);
+
+  if (enable) {
+    status_value |= ADS1256_STATUS_AUTOCAL_ENABLE;
+  } else {
+    status_value &= ~ADS1256_STATUS_AUTOCAL_ENABLE;
+  }
+
+  writeRegister(ADS1256_REG_STATUS, status_value);
+}
+
+void ADS1256::differentialChannelValue(uint8_t channelN, uint8_t channelP) {
+  if (channelN > 7 || channelP > 7)
+  {
+    Serial.println("Error: Channel numbers must be between 0 and 7.");
+  } else {
+    writeRegister(ADS1256_REG_MUX, (channelP << 4) | channelN);
+  }
+}
 
 // ---------------------------------------------------
 // Helper functions
