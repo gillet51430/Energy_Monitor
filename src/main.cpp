@@ -12,21 +12,14 @@
 
 // --- Paramètres de mesure ---
 #define VREF_VOLTS 2.5 // Tension de référence de votre carte ADS1256
-
-//Values for registers
-uint8_t registerAddress;      //address of the register, both for reading and writing - selects the register
-uint8_t registerValueR;       //this is used to READ a register
-uint8_t registerValueW;       //this is used to WRITE a register
-int32_t registerData;         //this is used to store the data read from the register (for the AD-conversion)
-uint8_t directCommand;        //this is used to store the direct command for sending a command to the ADS1256
-String PrintMessage;          //this is used to concatenate stuff into before printing it out.
+#define OFFSET_VOLTAGE 0.004
 
 bool acquisition_active = false;
 unsigned long last_measurement_time = 0;
 const long measurement_interval = 50; // Intervalle en ms
 
 void handleSerialCommands();
-void sendReadySignal();
+void sendStatus(String message);
 
 // --- Instances ---
 SPIClass ADS1256_SPI(VSPI);
@@ -37,7 +30,6 @@ void setup() {
   while (!Serial);  
 
   ADS1256_SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI, -1);
-
   adc.begin();
   delay(500);
   adc.reset();
@@ -46,10 +38,10 @@ void setup() {
   // adc.printAllRegisters();
 
   adc.differentialChannelValue(ADS1256_MUX_AIN1, ADS1256_MUX_AIN0);
-  // adc.setBuffer(true);
-  // adc.setAutoCalibration(true);
-  // adc.setPGA(ADS1256_ADCON_PGA_1);
-  // adc.reset();
+  adc.setBuffer(true);
+  adc.setAutoCalibration(true);
+  adc.setPGA(ADS1256_ADCON_PGA_1);
+  adc.reset();
 
   // Serial.println("\nRegistres après configuration et calibration :");
   // adc.printAllRegisters();
@@ -58,7 +50,7 @@ void setup() {
   // Serial.println("Configuration terminée. Début des mesures...");
   // Serial.println("--------------------------------------------------");
 
-  sendReadySignal(); // Indique que l'ESP est prêt après le démarrage
+  sendStatus("ESP ready");
 }
 
 void loop() {
@@ -66,9 +58,33 @@ void loop() {
 
   if (acquisition_active && (millis() - last_measurement_time >= measurement_interval)) {
     last_measurement_time = millis();
-    int32_t raw_adc = adc.readRawData();
-    float voltage = adc.convertToVoltage(raw_adc);
-    Serial.printf("Channel 1: %.4f V | Channel 2: %.4f V | Channel 3: %.4f V | Channel 4: %.4f V\n", voltage, 0.0, 0.0, 0.0);
+
+    // Lecture des 4 canaux différentiels
+    // Canal 1 (AIN0-AIN1)
+    adc.differentialChannelValue(ADS1256_MUX_AIN1, ADS1256_MUX_AIN0);
+    delay(1); // Petit délai pour le changement de MUX
+    float voltage1 = adc.convertToVoltage(adc.readRawData());
+
+    // Canal 2 (AIN2-AIN3)
+    adc.differentialChannelValue(ADS1256_MUX_AIN3, ADS1256_MUX_AIN2);
+    delay(1);
+    float voltage2 = adc.convertToVoltage(adc.readRawData());
+    voltage2 -= voltage1 + OFFSET_VOLTAGE;
+
+    // // Canal 3 (AIN4-AIN5)
+    // adc.differentialChannelValue(ADS1256_MUX_AIN5, ADS1256_MUX_AIN4);
+    // delay(1);
+    // float voltage3 = adc.convertToVoltage(adc.readRawData());
+    
+    // // Canal 4 (AIN6-AIN7)
+    // adc.differentialChannelValue(ADS1256_MUX_AIN7, ADS1256_MUX_AIN6);
+    // delay(1);
+    // float voltage4 = adc.convertToVoltage(adc.readRawData());
+
+    float voltage3 = 0.0;
+    float voltage4 = 0.0;
+
+    Serial.printf("Channel 1: %.4f V | Channel 2: %.4f V | Channel 3: %.4f V | Channel 4: %.4f V\n", voltage1, voltage2, voltage3, voltage4);
   }
 }
 
@@ -77,7 +93,7 @@ void handleSerialCommands() {
     String command = Serial.readStringUntil('\n');
     command.trim();
     
-    Serial.print("Commande reçue : ");
+    Serial.print("Received command: ");
     Serial.println(command);
 
     if (command.startsWith("GAIN:")) {
@@ -91,45 +107,57 @@ void handleSerialCommands() {
         case 32: adc.setPGA(ADS1256_ADCON_PGA_32); break;
         case 64: adc.setPGA(ADS1256_ADCON_PGA_64); break;
       }
-      Serial.println("Gain mis à jour.");
-      sendReadySignal();
+      sendStatus("Gain updated.");
     }
     else if (command.startsWith("BUFFER:")) {
       String state = command.substring(7);
       if (state == "ON") {
         adc.setBuffer(true);
-        Serial.println("Buffer activé.");
-        sendReadySignal();
+        sendStatus("Buffer enabled.");
       } else if (state == "OFF") {
         adc.setBuffer(false);
-        Serial.println("Buffer désactivé.");
-        sendReadySignal();
+        sendStatus("Buffer disabled.");
       }
     }
+    else if (command.startsWith("DRATE:")) {
+        int rate = command.substring(6).toInt();
+        uint8_t rate_code;
+        // Correspondance entre la valeur en SPS et le code du registre
+        if (rate == 30000) rate_code = ADS1256_DRATE_30000SPS;
+        else if (rate >= 15000) rate_code = ADS1256_DRATE_15000SPS;
+        else if (rate >= 7500) rate_code = ADS1256_DRATE_7500SPS;
+        else if (rate >= 3750) rate_code = ADS1256_DRATE_3750SPS;
+        else if (rate >= 2000) rate_code = ADS1256_DRATE_2000SPS;
+        else if (rate >= 1000) rate_code = ADS1256_DRATE_1000SPS;
+        else if (rate >= 500) rate_code = ADS1256_DRATE_500SPS;
+        // ... ajoutez les autres valeurs ici
+        else { rate_code = ADS1256_DRATE_30000SPS; } // Default
+        
+        adc.setDataRate(rate_code);
+        sendStatus("Data Rate updated.");
+    }
     else if (command == "CAL:SELF") {
-        Serial.println("Lancement de l'auto-calibration...");
+        sendStatus("Starting self-calibration...");
         adc.selfCalibration(); 
-        Serial.println("Calibration terminée.");
-        sendReadySignal();
+        sendStatus("Calibration finished.");
     }
     else if (command == "RESET") {
-        Serial.println("Lancement du reset...");
+        sendStatus("Resetting ADC...");
         adc.reset(); 
-        Serial.println("Reset terminé.");
-        sendReadySignal();
+        sendStatus("Reset finished.");
     }
     else if (command == "START") {
       acquisition_active = true;
-      Serial.println("Démarrage de l'acquisition.");
+      sendStatus("Acquisition started.");
     }
     else if (command == "STOP") {
       acquisition_active = false;
-      Serial.println("Arrêt de l'acquisition.");
+      sendStatus("Acquisition stopped.");
     }
   }
 }
 
-void sendReadySignal(){
-  delay(100); // Petite pause pour s'assurer que le buffer série est prêt
-  Serial.println("ESP32 Ready");
+void sendStatus(String message){
+  Serial.print("Status:");
+  Serial.println(message);
 }

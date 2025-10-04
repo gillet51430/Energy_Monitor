@@ -103,6 +103,7 @@ public:
     void setPGA(uint8_t pga_gain_code);
     void setBuffer(bool enable);
     void setAutoCalibration(bool enable);
+    void setDataRate(uint8_t drate_code);
 
     void differentialChannelValue(uint8_t channelN, uint8_t channelP);
 

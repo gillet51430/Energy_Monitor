@@ -172,7 +172,7 @@ int32_t ADS1256::readRawData() {
   waitForDRDY();
   digitalWrite(_cs_pin, LOW);
   _spi.transfer(ADS1256_CMD_RDATA);
-  delayMicroseconds(t6*tau*2); 
+  delayMicroseconds(t6*tau); 
 
   uint32_t result = 0;
   result |= (uint32_t)_spi.transfer(0x00) << 16; // MSB
@@ -228,6 +228,11 @@ void ADS1256::setAutoCalibration(bool enable) {
   }
 
   writeRegister(ADS1256_REG_STATUS, status_value);
+}
+
+void ADS1256::setDataRate(uint8_t drate_code) {
+  writeRegister(ADS1256_REG_DRATE, drate_code);
+  reset(); // Un reset est souvent nécessaire pour appliquer de nouveaux paramètres de timing
 }
 
 void ADS1256::differentialChannelValue(uint8_t channelN, uint8_t channelP) {
