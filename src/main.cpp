@@ -23,7 +23,7 @@ String PrintMessage;          //this is used to concatenate stuff into before pr
 
 bool acquisition_active = false;
 unsigned long last_measurement_time = 0;
-const long measurement_interval = 500; // Intervalle en ms
+const long measurement_interval = 50; // Intervalle en ms
 
 void handleSerialCommands();
 void sendReadySignal();
@@ -108,8 +108,14 @@ void handleSerialCommands() {
     }
     else if (command == "CAL:SELF") {
         Serial.println("Lancement de l'auto-calibration...");
-        adc.reset(); // Un reset est une manière simple de relancer une calibration
+        adc.selfCalibration(); 
         Serial.println("Calibration terminée.");
+        sendReadySignal();
+    }
+    else if (command == "RESET") {
+        Serial.println("Lancement du reset...");
+        adc.reset(); 
+        Serial.println("Reset terminé.");
         sendReadySignal();
     }
     else if (command == "START") {

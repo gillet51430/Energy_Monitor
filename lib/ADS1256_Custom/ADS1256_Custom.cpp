@@ -117,11 +117,22 @@ uint8_t ADS1256::readRegister(uint8_t reg)
 void ADS1256::reset()
 {
   _spi.beginTransaction(SPISettings(SPI_SPEED, MSBFIRST, SPI_MODE1)); // initialize SPI with  clock, MSB first, SPI Mode1
-  digitalWrite(_cs_pin, LOW);           // Pull CS low
-  _spi.transfer(ADS1256_CMD_RESET);     // Send RESET command
-  digitalWrite(_cs_pin, HIGH);         // Pull CS high
+  digitalWrite(_cs_pin, LOW);             // Pull CS low
+  _spi.transfer(ADS1256_CMD_RESET);       // Send RESET command
+  digitalWrite(_cs_pin, HIGH);            // Pull CS high
   _spi.endTransaction();
-  delay(10); // Give time to the reset to start
+  delay(10);                              // Give time to the reset to start
+  while (digitalRead(_drdy_pin) == HIGH); // It's mandatory to wait for DRDY to go low after a reset
+}
+
+void ADS1256::selfCalibration()
+{
+  _spi.beginTransaction(SPISettings(SPI_SPEED, MSBFIRST, SPI_MODE1)); // initialize SPI with  clock, MSB first, SPI Mode1
+  digitalWrite(_cs_pin, LOW);             // Pull CS low
+  _spi.transfer(ADS1256_CMD_SELFCAL);     // Send SELF_CALIBRATION command
+  digitalWrite(_cs_pin, HIGH);            // Pull CS high
+  _spi.endTransaction();
+  delay(1000);                            // Give time to the calibration. The time is depending from the rate with a max of 800.3ms at 2.5 SPS
   while (digitalRead(_drdy_pin) == HIGH); // It's mandatory to wait for DRDY to go low after a reset
 }
 
