@@ -18,7 +18,9 @@ const unsigned int SAMPLING_DURATION_MS = 10000;
 
 void handleSerialCommands();
 void sendReadySignal();
-void performACMeasurementAndSend();
+
+void performACMeasurement();
+int32_t measureOffset(); // Fonction utilitaire
 
 SPIClass ADS1256_SPI(VSPI);
 ADS1256 adc(CS_PIN, DRDY_PIN, PWDN_PIN, VREF_VOLTS, ADS1256_SPI);
@@ -38,6 +40,9 @@ void setup() {
   adc.setBuffer(true);
   adc.setPGA(ADS1256_ADCON_PGA_1);
 
+  adc.differentialChannelValue(ADS1256_MUX_AIN1, ADS1256_MUX_AIN0);
+  int32_t test = adc.readRawData();
+
   sendReadySignal(); 
 }
 
@@ -46,17 +51,19 @@ void loop() {
   delay(10); 
 }
 
-void performACMeasurementAndSend() {
+int32_t measureOffset() {
     adc.differentialChannelValue(ADS1256_MUX_AIN1, ADS1256_MUX_AIN0);
-    delay(50);
     long long offset_sum = 0;
     for(int i = 0; i < 100; i++) {
       offset_sum += adc.readRawData();
     }
-    int32_t offset_raw = offset_sum / 100;
+    return offset_sum / 100;
+}
+
+void performACMeasurement() {
+    int32_t offset_raw = measureOffset();
 
     adc.differentialChannelValue(ADS1256_MUX_AIN3, ADS1256_MUX_AIN2);
-    delay(50);
 
     std::vector<int32_t> samples;
     unsigned long start_time = millis();
@@ -78,7 +85,6 @@ void performACMeasurementAndSend() {
     Serial.println("END_DATA");
 }
 
-
 void handleSerialCommands() {
   if (Serial.available() > 0) {
     String command = Serial.readStringUntil('\n');
@@ -86,18 +92,22 @@ void handleSerialCommands() {
     if (command.length() == 0) return;
 
     if (command == "GET_SAMPLES") {
-        performACMeasurementAndSend();
+        performACMeasurement();
         sendReadySignal();
     }
     else if (command.startsWith("GAIN:")) {
       int gain = command.substring(5).toInt();
       switch(gain) {
         case 1: adc.setPGA(ADS1256_ADCON_PGA_1); break;
+        case 2: adc.setPGA(ADS1256_ADCON_PGA_2); break;
+        case 4: adc.setPGA(ADS1256_ADCON_PGA_4); break;
+        case 8: adc.setPGA(ADS1256_ADCON_PGA_8); break;
+        case 16: adc.setPGA(ADS1256_ADCON_PGA_16); break;
+        case 32: adc.setPGA(ADS1256_ADCON_PGA_32); break;
         case 64: adc.setPGA(ADS1256_ADCON_PGA_64); break;
       }
       sendReadySignal();
     }
-    // --- MODIFICATION: Gestion de la commande DRATE ---
     else if (command.startsWith("DRATE:")) {
         int sps = command.substring(6).toInt();
         if (sps == 30000) adc.setDataRate(ADS1256_DRATE_30000SPS);
@@ -115,7 +125,7 @@ void handleSerialCommands() {
         else if (sps == 15) adc.setDataRate(ADS1256_DRATE_15SPS);
         else if (sps == 10) adc.setDataRate(ADS1256_DRATE_10SPS);
         else if (sps == 5) adc.setDataRate(ADS1256_DRATE_5SPS);
-        else if (sps == 2) adc.setDataRate(ADS1256_DRATE_2_5SPS); // Note: 2.5 devient 2
+        else if (sps == 2) adc.setDataRate(ADS1256_DRATE_2_5SPS);
         sendReadySignal();
     }
     else if (command.startsWith("BUFFER:")) {
