@@ -18,10 +18,7 @@ const unsigned int SAMPLING_DURATION_MS = 10000;
 
 void handleSerialCommands();
 void sendReadySignal();
-// --- MODIFICATION: Renommage et nouvelle fonction ---
-void performACMeasurementStandard();
-void performACMeasurementAdvanced();
-int32_t measureOffset(); // Fonction utilitaire
+void performACMeasurementAndSend();
 
 SPIClass ADS1256_SPI(VSPI);
 ADS1256 adc(CS_PIN, DRDY_PIN, PWDN_PIN, VREF_VOLTS, ADS1256_SPI);
@@ -49,21 +46,18 @@ void loop() {
   delay(10); 
 }
 
-int32_t measureOffset() {
+void performACMeasurementAndSend() {
     adc.differentialChannelValue(ADS1256_MUX_AIN1, ADS1256_MUX_AIN0);
+    delay(50);
     long long offset_sum = 0;
     for(int i = 0; i < 100; i++) {
       offset_sum += adc.readRawData();
     }
-    return offset_sum / 100;
-}
+    int32_t offset_raw = offset_sum / 100;
 
-void performACMeasurementStandard() {
-    // 1. Mesure de l'offset
-    int32_t offset_raw = measureOffset();
-
-    // 2. Mesure du signal avec soustraction de l'offset
     adc.differentialChannelValue(ADS1256_MUX_AIN3, ADS1256_MUX_AIN2);
+    delay(50);
+
     std::vector<int32_t> samples;
     unsigned long start_time = millis();
     while(millis() - start_time < SAMPLING_DURATION_MS) {
@@ -71,32 +65,9 @@ void performACMeasurementStandard() {
     }
 
     Serial.println("START_DATA");
-    for(size_t i = 0; i < samples.size(); ++i) {
-        Serial.print(samples[i]);
-        if (i < samples.size() - 1) {
-            Serial.print(",");
-        }
-    }
-    Serial.println();
-    Serial.println("END_DATA");
-}
+    Serial.print("OFFSET:");
+    Serial.println(offset_raw);
 
-void performACMeasurementAdvanced() {
-    // 2. Mesure du signal avec soustraction de l'offset
-    std::vector<int32_t> samples;
-    unsigned long start_time = millis();
-    while(millis() - start_time < SAMPLING_DURATION_MS) {
-        adc.differentialChannelValue(ADS1256_MUX_AIN1, ADS1256_MUX_AIN0);
-        int32_t offset1_raw = adc.readRawData(); 
-        adc.differentialChannelValue(ADS1256_MUX_AIN3, ADS1256_MUX_AIN2);
-        int32_t Data_raw = adc.readRawData();
-        adc.differentialChannelValue(ADS1256_MUX_AIN1, ADS1256_MUX_AIN0);
-        int32_t offset2_raw = adc.readRawData(); 
-        samples.push_back(Data_raw - (offset1_raw + offset2_raw) / 2);
-    }
-
-    // 2. Envoi des données
-    Serial.println("START_DATA");
     for(size_t i = 0; i < samples.size(); ++i) {
         Serial.print(samples[i]);
         if (i < samples.size() - 1) {
@@ -114,29 +85,19 @@ void handleSerialCommands() {
     command.trim();
     if (command.length() == 0) return;
 
-    // --- MODIFICATION: Gestion des nouvelles commandes de mesure ---
-    if (command == "GET_SAMPLES_STD") {
-        performACMeasurementStandard();
-        sendReadySignal();
-    }
-    else if (command == "GET_SAMPLES_ADV") {
-        performACMeasurementAdvanced();
+    if (command == "GET_SAMPLES") {
+        performACMeasurementAndSend();
         sendReadySignal();
     }
     else if (command.startsWith("GAIN:")) {
       int gain = command.substring(5).toInt();
       switch(gain) {
         case 1: adc.setPGA(ADS1256_ADCON_PGA_1); break;
-        // --- NOTE: Ajoutez les autres gains si vous les utilisez dans le futur ---
-        case 2: adc.setPGA(ADS1256_ADCON_PGA_2); break;
-        case 4: adc.setPGA(ADS1256_ADCON_PGA_4); break;
-        case 8: adc.setPGA(ADS1256_ADCON_PGA_8); break;
-        case 16: adc.setPGA(ADS1256_ADCON_PGA_16); break;
-        case 32: adc.setPGA(ADS1256_ADCON_PGA_32); break;
         case 64: adc.setPGA(ADS1256_ADCON_PGA_64); break;
       }
       sendReadySignal();
     }
+    // --- MODIFICATION: Gestion de la commande DRATE ---
     else if (command.startsWith("DRATE:")) {
         int sps = command.substring(6).toInt();
         if (sps == 30000) adc.setDataRate(ADS1256_DRATE_30000SPS);
@@ -154,7 +115,7 @@ void handleSerialCommands() {
         else if (sps == 15) adc.setDataRate(ADS1256_DRATE_15SPS);
         else if (sps == 10) adc.setDataRate(ADS1256_DRATE_10SPS);
         else if (sps == 5) adc.setDataRate(ADS1256_DRATE_5SPS);
-        else if (sps == 2) adc.setDataRate(ADS1256_DRATE_2_5SPS);
+        else if (sps == 2) adc.setDataRate(ADS1256_DRATE_2_5SPS); // Note: 2.5 devient 2
         sendReadySignal();
     }
     else if (command.startsWith("BUFFER:")) {

@@ -1,11 +1,11 @@
 # energy_monitor_pyqt.py
-# Version: 3.2.8
+# Version: 3.2.5
 
 import sys
 import serial
 import serial.tools.list_ports
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
-                             QHBoxLayout, QGridLayout, QLabel, QComboBox,
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                             QHBoxLayout, QGridLayout, QLabel, QComboBox, 
                              QPushButton, QCheckBox, QTextEdit, QGroupBox,
                              QLineEdit, QRadioButton, QSplitter, QMessageBox)
 from PyQt5.QtCore import QTimer, Qt, pyqtSignal, QThread
@@ -15,18 +15,18 @@ import numpy as np
 import qdarkstyle
 from collections import deque
 
-VERSION = "3.2.8"
+VERSION = "3.2.5"
 VREF_VOLTS = 2.5
 ADS1256_MAX_VALUE = 8388607.0
 
 class SerialReader(QThread):
     data_received = pyqtSignal(str)
-
+    
     def __init__(self, serial_instance):
         super().__init__()
         self.serial_instance = serial_instance
         self._is_running = True
-
+        
     def run(self):
         while self._is_running and self.serial_instance and self.serial_instance.is_open:
             try:
@@ -38,7 +38,7 @@ class SerialReader(QThread):
                 print(f"Serial read error: {e}")
                 break
             time.sleep(0.01)
-
+    
     def stop(self):
         self._is_running = False
 
@@ -47,16 +47,13 @@ class ADS1256Interface(QMainWindow):
         super().__init__()
         self.setWindowTitle("ADS1256 AC Waveform Analyzer")
         self.setGeometry(100, 100, 1400, 800)
-
+        
         self.serial_port = None
         self.serial_thread = None
         self.is_receiving_samples = False
         self.raw_sample_data = ""
-        # --- MODIFICATION: Gestion de multiples offsets ---
-        self.offsets = []
-
-        self.command_queue = deque()
-        self.is_applying_settings = False
+        self.raw_offset = 0
+        self.initial_settings_sent = False # Verrou pour l'envoi unique des settings
 
         self.init_ui()
         self.refresh_ports()
@@ -67,17 +64,17 @@ class ADS1256Interface(QMainWindow):
         main_layout = QHBoxLayout(central_widget)
 
         main_splitter = QSplitter(Qt.Horizontal)
-
+        
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(5, 5, 5, 5)
-
+        
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
-
+        
         self.right_splitter = QSplitter(Qt.Vertical)
-
+        
         pg.setConfigOption('background', None)
         pg.setConfigOption('foreground', '#f8f8f2')
         self.plot_widget = pg.PlotWidget()
@@ -86,7 +83,7 @@ class ADS1256Interface(QMainWindow):
         self.plot_widget.setLabel('left', 'Voltage', units='V')
         self.plot_widget.setLabel('bottom', 'Time', units='s')
         self.plot_widget.showGrid(x=True, y=True, alpha=0.3)
-
+        
         self.waveform_plot = self.plot_widget.plot(pen=pg.mkPen('#8be9fd', width=2))
         self.mean_line = pg.InfiniteLine(angle=0, movable=False, pen=pg.mkPen('#50fa7b', style=Qt.DashLine))
         self.mean_line.setVisible(False)
@@ -98,24 +95,22 @@ class ADS1256Interface(QMainWindow):
         self.plot_widget.addItem(self.crosshair_h, ignoreBounds=True)
         self.plot_widget.addItem(self.value_label, ignoreBounds=True)
         self.plot_widget.scene().sigMouseMoved.connect(self.on_mouse_move)
-
+        
         self.right_splitter.addWidget(self.plot_widget)
-
+        
         self.console = QTextEdit()
         self.console.setReadOnly(True)
-        self.console.setVisible(True)
+        self.console.setVisible(False)
         self.right_splitter.addWidget(self.console)
-
+        
         right_layout.addWidget(self.right_splitter)
-        self.right_splitter.setStretchFactor(0, 2)
-        self.right_splitter.setStretchFactor(1, 2)
+        self.right_splitter.setStretchFactor(0, 3)
+        self.right_splitter.setStretchFactor(1, 1)
 
         left_layout.addWidget(QLabel(f"Version {VERSION}"))
         self.create_connection_group(left_layout)
         self.create_status_group(left_layout)
         self.create_settings_group(left_layout)
-        # --- NOUVEAU: Groupe pour le mode d'acquisition ---
-        self.create_acquisition_mode_group(left_layout)
         self.create_commands_group(left_layout)
         self.create_view_group(left_layout)
         left_layout.addStretch()
@@ -124,26 +119,25 @@ class ADS1256Interface(QMainWindow):
         main_splitter.addWidget(right_panel)
         main_splitter.setStretchFactor(0, 1)
         main_splitter.setStretchFactor(1, 4)
-
+        
         main_layout.addWidget(main_splitter)
 
         self.countdown_timer = QTimer(self)
         self.countdown_timer.timeout.connect(self.update_countdown)
 
-    # ... (les fonctions on_mouse_move, create_connection_group, create_status_group, create_settings_group restent inchangées) ...
     def on_mouse_move(self, pos):
         if self.plot_widget.sceneBoundingRect().contains(pos):
             mouse_point = self.plot_widget.getPlotItem().vb.mapSceneToView(pos)
             x, y = mouse_point.x(), mouse_point.y()
-
+            
             self.crosshair_v.setPos(x)
             self.crosshair_h.setPos(y)
-
+            
             x_data, y_data = self.waveform_plot.getData()
             if x_data is not None and len(x_data) > 0:
                 index = np.abs(x_data - x).argmin()
                 px, py = x_data[index], y_data[index]
-
+                
                 view_range = self.plot_widget.getPlotItem().vb.viewRange()
                 y_span = view_range[1][1] - view_range[1][0]
                 if abs(py - y) < y_span * 0.05:
@@ -183,7 +177,7 @@ class ADS1256Interface(QMainWindow):
         self.status_label.setWordWrap(True)
         self.status_label.setStyleSheet("color: #8be9fd;")
         vbox.addWidget(self.status_label)
-
+        
         self.countdown_label = QLabel("")
         self.countdown_label.setStyleSheet("font-weight: bold; color: #ffb86c;")
         self.countdown_label.setVisible(False)
@@ -191,7 +185,7 @@ class ADS1256Interface(QMainWindow):
 
         group.setLayout(vbox)
         layout.addWidget(group)
-
+    
     def create_settings_group(self, layout):
         group = QGroupBox("ADS Settings")
         grid = QGridLayout()
@@ -199,7 +193,7 @@ class ADS1256Interface(QMainWindow):
         self.gain_combo = QComboBox()
         self.gain_combo.addItems(["1", "2", "4", "8", "16", "32", "64"])
         grid.addWidget(self.gain_combo, 0, 1)
-
+        
         grid.addWidget(QLabel("Data Rate (SPS):"), 1, 0)
         self.datarate_combo = QComboBox()
         self.datarate_combo.addItems(["30000", "15000", "7500", "3750", "2000", "1000", "500", "100", "60", "50", "30", "25", "15", "10", "5", "2.5"])
@@ -215,20 +209,6 @@ class ADS1256Interface(QMainWindow):
         group.setLayout(grid)
         layout.addWidget(group)
     
-    # --- NOUVELLE FONCTION ---
-    def create_acquisition_mode_group(self, layout):
-        group = QGroupBox("Acquisition Mode")
-        vbox = QVBoxLayout()
-        self.mode_standard_radio = QRadioButton("Standard (Offset mesuré avant)")
-        self.mode_standard_radio.setChecked(True)
-        vbox.addWidget(self.mode_standard_radio)
-        
-        self.mode_advanced_radio = QRadioButton("Advanced (Offset encadrant la mesure)")
-        vbox.addWidget(self.mode_advanced_radio)
-        
-        group.setLayout(vbox)
-        layout.addWidget(group)
-
     def create_commands_group(self, layout):
         group = QGroupBox("Commands")
         vbox = QVBoxLayout()
@@ -236,30 +216,30 @@ class ADS1256Interface(QMainWindow):
         self.ac_measure_btn.setEnabled(False)
         self.ac_measure_btn.clicked.connect(self.request_ac_measurement)
         vbox.addWidget(self.ac_measure_btn)
-
+        
         self.cal_btn = QPushButton("Calibrate ADS")
         self.cal_btn.clicked.connect(lambda: self.send_command("CAL:SELF"))
         vbox.addWidget(self.cal_btn)
-
+        
         self.reset_btn = QPushButton("Reset ADS")
         self.reset_btn.clicked.connect(lambda: self.send_command("RESET"))
         vbox.addWidget(self.reset_btn)
-
+        
         self.clear_graph_btn = QPushButton("Clear Graph")
         self.clear_graph_btn.clicked.connect(self.clear_graph)
         vbox.addWidget(self.clear_graph_btn)
-
+        
         group.setLayout(vbox)
         layout.addWidget(group)
-
+    
     def create_view_group(self, layout):
         group = QGroupBox("View")
         vbox = QVBoxLayout()
         self.console_check = QCheckBox("Show Console")
-        self.console_check.setChecked(True)
+        self.console_check.setChecked(False) 
         self.console_check.stateChanged.connect(lambda state: self.console.setVisible(state == Qt.Checked))
         vbox.addWidget(self.console_check)
-
+        
         self.show_mean_check = QCheckBox("Show Mean Value")
         self.show_mean_check.setChecked(False)
         self.show_mean_check.stateChanged.connect(self.toggle_mean_line)
@@ -294,6 +274,7 @@ class ADS1256Interface(QMainWindow):
                 self.serial_port = serial.Serial(port, 115200, timeout=1)
                 self.serial_thread = SerialReader(self.serial_port)
                 self.serial_thread.data_received.connect(self.process_serial_data)
+                self.initial_settings_sent = False
                 self.serial_thread.start()
                 self.connect_btn.setText("Disconnect")
                 self.led.setStyleSheet("color: #50fa7b; font-size: 24px;")
@@ -302,16 +283,12 @@ class ADS1256Interface(QMainWindow):
                 QMessageBox.critical(self, "Connection Error", f"Failed to connect to {port}:\n{e}")
 
     def request_ac_measurement(self):
-        # --- MODIFICATION: Envoi de la commande en fonction du mode ---
-        if self.mode_standard_radio.isChecked():
-            self.send_command("GET_SAMPLES_STD")
-        else:
-            self.send_command("GET_SAMPLES_ADV")
-            
+        self.send_command("GET_SAMPLES")
         self.status_label.setText("Mesure de l'offset...")
+        self.set_ui_for_ready_state(False)
         self.clear_graph()
         QTimer.singleShot(500, self.start_main_countdown)
-        
+
     def start_main_countdown(self):
         self.status_label.setText("Mesure AC en cours...")
         self.countdown_value = 10
@@ -336,14 +313,12 @@ class ADS1256Interface(QMainWindow):
         if line == "START_DATA":
             self.is_receiving_samples = True
             self.raw_sample_data = ""
-            # --- MODIFICATION: Réinitialisation de la liste d'offsets ---
-            self.offsets = []
+            self.raw_offset = 0
             return
 
         if self.is_receiving_samples:
-            # --- MODIFICATION: Capture de tous les offsets ---
-            if line.startswith("OFFSET"): # Capture OFFSET, OFFSET1, OFFSET2, etc.
-                self.offsets.append(int(line.split(':')[1]))
+            if line.startswith("OFFSET:"):
+                self.raw_offset = int(line.split(':')[1])
             elif line == "END_DATA":
                 self.is_receiving_samples = False
                 self.process_and_plot_samples()
@@ -353,32 +328,22 @@ class ADS1256Interface(QMainWindow):
                 self.raw_sample_data += line
         
         elif "ESP32 Ready" in line:
-            if self.is_applying_settings:
-                if self.command_queue:
-                    self.send_next_command()
-                else:
-                    self.is_applying_settings = False
-                    self.set_ui_for_ready_state(True)
-                    self.status_label.setText("ESP32 Prêt. Paramètres appliqués.")
-            else:
-                self.set_ui_for_ready_state(True)
-                self.status_label.setText("ESP32 Prêt.")
+            self.set_ui_for_ready_state(True)
+            self.status_label.setText("ESP32 Prêt.")
+            if not self.initial_settings_sent:
+                self.apply_settings()
+                self.initial_settings_sent = True
 
     def process_and_plot_samples(self):
         try:
             samples_str = self.raw_sample_data.split(',')
             raw_samples = np.array([int(s) for s in samples_str if s])
             
-            # --- MODIFICATION: Calcul de l'offset final ---
-            if not self.offsets:
-                raise ValueError("Aucune valeur d'offset reçue.")
-            final_offset = np.mean(self.offsets)
-
             gain = float(self.gain_combo.currentText())
 
-            voltages = (raw_samples - final_offset) / ADS1256_MAX_VALUE * (VREF_VOLTS * 2.0) / gain
+            voltages = (raw_samples - self.raw_offset) / ADS1256_MAX_VALUE * (VREF_VOLTS * 2.0) / gain
             
-            sum_sq = np.sum(np.square(raw_samples - final_offset))
+            sum_sq = np.sum(np.square(raw_samples - self.raw_offset))
             mean_sq = sum_sq / len(raw_samples)
             rms_raw = np.sqrt(mean_sq)
             rms_voltage = (rms_raw / ADS1256_MAX_VALUE) * (VREF_VOLTS * 2.0) / gain
@@ -401,54 +366,29 @@ class ADS1256Interface(QMainWindow):
         except (ValueError, IndexError) as e:
             self.status_label.setText(f"Erreur de traitement des données: {e}")
             print(f"Error processing data: {e}")
-            
-    # ... (le reste du fichier : send_command, send_raw_command, send_next_command, apply_settings, etc. reste inchangé) ...
+
     def send_command(self, cmd):
         if self.serial_port and self.serial_port.is_open:
-            self.set_ui_for_ready_state(False)
-            self.status_label.setText(f"Commande '{cmd}' envoyée...")
-            self.send_raw_command(cmd)
-
-    def send_raw_command(self, cmd):
-        if self.serial_port and self.serial_port.is_open:
-            self.console.append(f"-> {cmd}")
+            self.console.append(f"-> {cmd}") # Afficher la commande envoyée
             self.serial_port.write((cmd + '\n').encode('utf-8'))
-
-    def send_next_command(self):
-        if self.command_queue:
-            command = self.command_queue.popleft()
-            self.status_label.setText(f"Application de: '{command}'...")
-            self.send_raw_command(command)
-        
+            self.set_ui_for_ready_state(False) # Griser les boutons en attendant la réponse
+            self.status_label.setText(f"Commande '{cmd}' envoyée...")
+            
     def apply_settings(self):
-        self.command_queue.clear()
+        self.send_command(f"GAIN:{self.gain_combo.currentText()}")
+        # La confirmation viendra avec le "ESP Ready"
         
-        gain_cmd = f"GAIN:{self.gain_combo.currentText()}"
-        self.command_queue.append(gain_cmd)
-
-        drate_text = self.datarate_combo.currentText()
-        sps_to_send = "2" if drate_text == "2.5" else drate_text
-        drate_cmd = f"DRATE:{sps_to_send}"
-        self.command_queue.append(drate_cmd)
-
-        buffer_state = "ON" if self.buffer_check.isChecked() else "OFF"
-        buffer_cmd = f"BUFFER:{buffer_state}"
-        self.command_queue.append(buffer_cmd)
-
-        self.is_applying_settings = True
-        self.set_ui_for_ready_state(False)
-        self.send_next_command()
-
     def clear_graph(self):
         self.waveform_plot.clear()
         self.mean_line.setVisible(False)
 
     def set_ui_for_ready_state(self, is_ready):
+        """Active ou désactive les boutons en fonction de l'état de l'ESP."""
         self.ac_measure_btn.setEnabled(is_ready)
         self.apply_settings_btn.setEnabled(is_ready)
         self.cal_btn.setEnabled(is_ready)
         self.reset_btn.setEnabled(is_ready)
-
+        
     def closeEvent(self, event):
         if self.serial_port and self.serial_port.is_open:
             self.toggle_connection()
