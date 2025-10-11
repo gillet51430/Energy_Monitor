@@ -110,7 +110,6 @@ public:
     void startContinuousConversion();
     void stopContinuousConversion();
     int32_t readContinuousData_LSB();
-    void readContinuousTest();
 
 private:
     // --- Broches et configuration ---

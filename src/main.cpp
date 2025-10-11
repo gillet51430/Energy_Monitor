@@ -147,7 +147,7 @@ void handleSerialCommands() {
     command.trim();
     if (command.length() == 0) return;
 
-    if (command == "GET_SAMPLES") {
+    if (command == "START") {
         performACMeasurement();
         sendReadySignal();
     }

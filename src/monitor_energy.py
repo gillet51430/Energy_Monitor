@@ -302,7 +302,7 @@ class ADS1256Interface(QMainWindow):
                 QMessageBox.critical(self, "Connection Error", f"Failed to connect to {port}:\n{e}")
 
     def request_ac_measurement(self):
-        self.send_command("GET_SAMPLES")
+        self.send_command("START")
         self.status_label.setText("Mesure de l'offset...")
         self.clear_graph()
         QTimer.singleShot(500, self.start_main_countdown)

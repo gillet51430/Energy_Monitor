@@ -287,53 +287,6 @@ int32_t ADS1256::readContinuousData_LSB()
     return raw_data;
 }
 
-void readContinuousTest() //Reads the recently selected channel using RDATAC
-{
-  byte outputBuffer[3]; //3-byte (24-bit) buffer for the fast acquisition - Single-channel, continuous
-  
-  _spi.beginTransaction(SPISettings(SPI_SPEED, MSBFIRST, SPI_MODE1)); // initialize SPI with  clock, MSB first, SPI Mode1
-  digitalWrite(_cs_pin, LOW); //REF: P34: "CS must stay low during the entire command sequence"
-
-  //These variables serve only testing purposes!
-  //uint32_t loopcounter = 0;
-  //StartTime = micros();
-  //--------------------------------------------
-
-  while (_dataReady == false) {} //Wait until DRDY does low, then issue the command
-  _spi.transfer(B00000011);  //Issue RDATAC (0000 0011) command after DRDY goes low
-  delayMicroseconds(7); //Wait t6 time (~6.51 us) REF: P34, FIG:30.
-
-  while (Serial.read() != 's')
-  {
-    //while (GPIOA->regs->IDR & 0x0004){} //direct port access to A2 (DRDY) pin - less reliable polling alternative
-    while (_dataReady == false) {} //waiting for the dataReady ISR
-    //Reading a single input continuously using the RDATAC
-    //step out the data: MSB | mid-byte | LSB
-    outputBuffer[0] = _spi.transfer(0); // MSB comes in
-    outputBuffer[1] = _spi.transfer(0); // Mid-byte
-    outputBuffer[2] = _spi.transfer(0); // LSB - final conversion result
-    //After this, DRDY should go HIGH automatically
-    Serial.write(outputBuffer, sizeof(outputBuffer)); //this buffer is [3]
-    _dataReady = false; //reset dataReady manually
-
-    /*
-      //These variables only serve test purposes!
-      loopcounter++;
-      //if(micros() - StartTime >= 5000000) //5 s
-      if(loopcounter >= 150000)
-      {
-             Serial.print(" Loops: ");
-             Serial.println(loopcounter++);
-             Serial.println(micros() - StartTime);
-             break; //exit the whole thing
-      }
-    */
-  }
-  _spi.transfer(B00001111); //SDATAC stops the RDATAC - the received 's' just breaks the while(), this stops the acquisition
-  digitalWrite(_cs_pin, HIGH); //We finished the command sequence, so we switch it back to HIGH
-  _spi.endTransaction();
-}
-
 // ---------------------------------------------------
 // Helper functions
 // ---------------------------------------------------
