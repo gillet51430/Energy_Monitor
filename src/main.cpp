@@ -20,7 +20,9 @@ void handleSerialCommands();
 void sendReadySignal();
 
 void performACMeasurement();
+void performACMeasurementContinuous();
 int32_t measureOffset(); // Fonction utilitaire
+int32_t measureOffsetContinous(); // Fonction utilitaire
 
 SPIClass ADS1256_SPI(VSPI);
 ADS1256 adc(CS_PIN, DRDY_PIN, PWDN_PIN, VREF_VOLTS, ADS1256_SPI);
@@ -52,12 +54,28 @@ void loop() {
 }
 
 int32_t measureOffset() {
+  int16_t sampleSize = 100;
+  adc.differentialChannelValue(ADS1256_MUX_AIN1, ADS1256_MUX_AIN0);
+  long long offset_sum = 0;
+  for (int i = 0; i < sampleSize; i++)
+  {
+    offset_sum += adc.readRawData();
+  }
+    return offset_sum / sampleSize;
+}
+
+int32_t measureOffsetContinous() {
+
     adc.differentialChannelValue(ADS1256_MUX_AIN1, ADS1256_MUX_AIN0);
-    long long offset_sum = 0;
+    adc.startContinuousConversion();
+
+    long offset_sum = 0;
     for(int i = 0; i < 100; i++) {
-      offset_sum += adc.readRawData();
+      offset_sum += adc.readContinuousData_LSB();
+      Serial.println(offset_sum);
     }
-    return offset_sum / 100;
+    adc.stopContinuousConversion();
+    return offset_sum /100;
 }
 
 void performACMeasurement() {
@@ -75,14 +93,52 @@ void performACMeasurement() {
     Serial.print("OFFSET:");
     Serial.println(offset_raw);
 
+    int32_t count = 1;
     for(size_t i = 0; i < samples.size(); ++i) {
         Serial.print(samples[i]);
         if (i < samples.size() - 1) {
             Serial.print(",");
         }
+        count++;
     }
     Serial.println();
     Serial.println("END_DATA");
+    Serial.printf("COUNT:%d\n", count);
+}
+
+void performACMeasurementContinuous() {
+
+/*
+NE FONCTIONNE PAS, PROBLEME AVEC LA LECTURE CONTINUE
+*/
+
+    int32_t offset_raw = measureOffsetContinous();
+
+    adc.differentialChannelValue(ADS1256_MUX_AIN3, ADS1256_MUX_AIN2);
+    adc.startContinuousConversion();
+
+    std::vector<int32_t> samples;
+    unsigned long start_time = millis();
+    while(millis() - start_time < SAMPLING_DURATION_MS) {
+        samples.push_back(adc.readContinuousData_LSB());
+    }
+    adc.stopContinuousConversion();
+
+    Serial.println("START_DATA");
+    Serial.print("OFFSET:");
+    Serial.println(offset_raw);
+
+    int32_t count = 1;
+    for(size_t i = 0; i < samples.size(); ++i) {
+        Serial.print(samples[i]);
+        if (i < samples.size() - 1) {
+            Serial.print(",");
+        }
+        count++;
+    }
+    Serial.println();
+    Serial.println("END_DATA");
+    Serial.printf("COUNT:%d\n", count);
 }
 
 void handleSerialCommands() {
@@ -147,3 +203,5 @@ void sendReadySignal(){
   delay(100);
   Serial.println("ESP32 Ready");
 }
+
+

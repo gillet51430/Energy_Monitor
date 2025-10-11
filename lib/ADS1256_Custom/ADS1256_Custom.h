@@ -107,6 +107,11 @@ public:
 
     void differentialChannelValue(uint8_t channelN, uint8_t channelP);
 
+    void startContinuousConversion();
+    void stopContinuousConversion();
+    int32_t readContinuousData_LSB();
+    void readContinuousTest();
+
 private:
     // --- Broches et configuration ---
     uint8_t _cs_pin;

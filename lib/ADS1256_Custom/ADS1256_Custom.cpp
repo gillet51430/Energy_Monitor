@@ -244,6 +244,96 @@ void ADS1256::differentialChannelValue(uint8_t channelN, uint8_t channelP) {
   }
 }
 
+void ADS1256::startContinuousConversion()
+{
+    // Continuous mode (RDATAC) requires a SYNC and WAKEUP command before the first RDATAC
+    // and then only RDATAC for subsequent reads.
+    _spi.beginTransaction(SPISettings(SPI_SPEED, MSBFIRST, SPI_MODE1));
+    _spi.transfer(ADS1256_CMD_SYNC);   // Sync the ADC
+    _spi.transfer(ADS1256_CMD_WAKEUP); // Wake up from standby if needed (often auto-synced)
+    waitForDRDY();                              // Wait for first conversion to be ready
+    digitalWrite(_cs_pin, LOW);                 // Pull CS low for continuous read
+    _spi.transfer(ADS1256_CMD_RDATAC);          // Send RDATAC command
+    delayMicroseconds(t6);                 // t6 in datasheet (delay before 1st data get available)
+    _spi.endTransaction();
+    // DRDY will pulse low for each new conversion data
+}
+
+void ADS1256::stopContinuousConversion()
+{
+    _spi.beginTransaction(SPISettings(SPI_SPEED, MSBFIRST, SPI_MODE1));
+    waitForDRDY();
+    _spi.transfer(ADS1256_CMD_SDATAC); // Send SDATAC command
+    digitalWrite(_cs_pin, HIGH);       // Pull CS high to stop continuous mode
+    // delay(50);                         // Give it time to stop
+    _spi.endTransaction();
+}
+
+int32_t ADS1256::readContinuousData_LSB()
+{
+    uint32_t raw_data = 0;
+    waitForDRDY(); // Wait for DRDY to go low for new data
+    // No CS low/high here because we are already in RDATAC mode
+    // Read 3 bytes of data
+    raw_data = ((long)_spi.transfer(0x00) << 16);
+    raw_data |= ((long)_spi.transfer(0x00) << 8);
+    raw_data |= _spi.transfer(0x00);
+
+    // Convert 24-bit two's complement to signed long
+    if (raw_data & 0x800000)
+    {                           // If MSB is set, it's a negative number
+        raw_data |= 0xFF000000; // Sign-extend to 32 bits
+    }
+    return raw_data;
+}
+
+void readContinuousTest() //Reads the recently selected channel using RDATAC
+{
+//   byte outputBuffer[3]; //3-byte (24-bit) buffer for the fast acquisition - Single-channel, continuous
+  
+//   _spi.beginTransaction(SPISettings(SPI_SPEED, MSBFIRST, SPI_MODE1)); // initialize SPI with  clock, MSB first, SPI Mode1
+//   digitalWrite(_cs_pin, LOW); //REF: P34: "CS must stay low during the entire command sequence"
+
+//   //These variables serve only testing purposes!
+//   //uint32_t loopcounter = 0;
+//   //StartTime = micros();
+//   //--------------------------------------------
+
+//   while (_dataReady == false) {} //Wait until DRDY does low, then issue the command
+//   _spi.transfer(B00000011);  //Issue RDATAC (0000 0011) command after DRDY goes low
+//   delayMicroseconds(7); //Wait t6 time (~6.51 us) REF: P34, FIG:30.
+
+//   while (Serial.read() != 's')
+//   {
+//     //while (GPIOA->regs->IDR & 0x0004){} //direct port access to A2 (DRDY) pin - less reliable polling alternative
+//     while (_dataReady == false) {} //waiting for the dataReady ISR
+//     //Reading a single input continuously using the RDATAC
+//     //step out the data: MSB | mid-byte | LSB
+//     outputBuffer[0] = _spi.transfer(0); // MSB comes in
+//     outputBuffer[1] = _spi.transfer(0); // Mid-byte
+//     outputBuffer[2] = _spi.transfer(0); // LSB - final conversion result
+//     //After this, DRDY should go HIGH automatically
+//     Serial.write(outputBuffer, sizeof(outputBuffer)); //this buffer is [3]
+//     _dataReady = false; //reset dataReady manually
+
+//     /*
+//       //These variables only serve test purposes!
+//       loopcounter++;
+//       //if(micros() - StartTime >= 5000000) //5 s
+//       if(loopcounter >= 150000)
+//       {
+//              Serial.print(" Loops: ");
+//              Serial.println(loopcounter++);
+//              Serial.println(micros() - StartTime);
+//              break; //exit the whole thing
+//       }
+//     */
+//   }
+//   _spi.transfer(B00001111); //SDATAC stops the RDATAC - the received 's' just breaks the while(), this stops the acquisition
+//   digitalWrite(_cs_pin, HIGH); //We finished the command sequence, so we switch it back to HIGH
+//   _spi.endTransaction();
+}
+
 // ---------------------------------------------------
 // Helper functions
 // ---------------------------------------------------

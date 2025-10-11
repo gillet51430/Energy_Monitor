@@ -1,5 +1,5 @@
 # energy_monitor_pyqt.py
-# Version: 3.2.8
+# Version: 3.2.12
 
 import sys
 import serial
@@ -15,7 +15,7 @@ import numpy as np
 import qdarkstyle
 from collections import deque
 
-VERSION = "3.2.8"
+VERSION = "3.2.12"
 VREF_VOLTS = 2.5
 ADS1256_MAX_VALUE = 8388607.0
 
@@ -52,7 +52,6 @@ class ADS1256Interface(QMainWindow):
         self.serial_thread = None
         self.is_receiving_samples = False
         self.raw_sample_data = ""
-        # --- MODIFICATION: Gestion de multiples offsets ---
         self.offsets = []
 
         self.command_queue = deque()
@@ -128,7 +127,6 @@ class ADS1256Interface(QMainWindow):
         self.countdown_timer = QTimer(self)
         self.countdown_timer.timeout.connect(self.update_countdown)
 
-    # ... (les fonctions on_mouse_move, create_connection_group, create_status_group, create_settings_group restent inchangées) ...
     def on_mouse_move(self, pos):
         if self.plot_widget.sceneBoundingRect().contains(pos):
             mouse_point = self.plot_widget.getPlotItem().vb.mapSceneToView(pos)
@@ -207,23 +205,26 @@ class ADS1256Interface(QMainWindow):
         self.buffer_check = QCheckBox("Buffer ON")
         self.buffer_check.setChecked(True)
         grid.addWidget(self.buffer_check, 2, 0, 1, 2)
+        
+        self.calibration_check = QCheckBox("Calibration")
+        self.calibration_check.setChecked(True)
+        grid.addWidget(self.calibration_check, 3, 0, 1, 2)
+
         self.apply_settings_btn = QPushButton("Apply Settings")
         self.apply_settings_btn.clicked.connect(self.apply_settings)
-        grid.addWidget(self.apply_settings_btn, 3, 0, 1, 2)
+        grid.addWidget(self.apply_settings_btn, 4, 0, 1, 2)
+        
         group.setLayout(grid)
         layout.addWidget(group)
 
     def create_commands_group(self, layout):
         group = QGroupBox("Commands")
         vbox = QVBoxLayout()
-        self.ac_measure_btn = QPushButton("Lancer Mesure AC")
+        self.ac_measure_btn = QPushButton("Start Monitoring")
+        self.ac_measure_btn.setStyleSheet("color: #50fa7b;")
         self.ac_measure_btn.setEnabled(False)
         self.ac_measure_btn.clicked.connect(self.request_ac_measurement)
         vbox.addWidget(self.ac_measure_btn)
-
-        self.cal_btn = QPushButton("Calibrate ADS")
-        self.cal_btn.clicked.connect(lambda: self.send_command("CAL:SELF"))
-        vbox.addWidget(self.cal_btn)
 
         self.reset_btn = QPushButton("Reset ADS")
         self.reset_btn.clicked.connect(lambda: self.send_command("RESET"))
@@ -232,6 +233,10 @@ class ADS1256Interface(QMainWindow):
         self.clear_graph_btn = QPushButton("Clear Graph")
         self.clear_graph_btn.clicked.connect(self.clear_graph)
         vbox.addWidget(self.clear_graph_btn)
+
+        clear_console_btn = QPushButton("Clear Console")
+        clear_console_btn.clicked.connect(self.clear_console)
+        vbox.addWidget(clear_console_btn)
 
         group.setLayout(vbox)
         layout.addWidget(group)
@@ -244,16 +249,27 @@ class ADS1256Interface(QMainWindow):
         self.console_check.stateChanged.connect(lambda state: self.console.setVisible(state == Qt.Checked))
         vbox.addWidget(self.console_check)
 
+        mean_layout = QHBoxLayout()
         self.show_mean_check = QCheckBox("Show Mean Value")
         self.show_mean_check.setChecked(False)
         self.show_mean_check.stateChanged.connect(self.toggle_mean_line)
-        vbox.addWidget(self.show_mean_check)
+        mean_layout.addWidget(self.show_mean_check)
+
+        self.mean_value_label = QLabel("")
+        self.mean_value_label.setStyleSheet("color: #50fa7b;")
+        mean_layout.addWidget(self.mean_value_label)
+        mean_layout.addStretch()
+        
+        vbox.addLayout(mean_layout)
 
         group.setLayout(vbox)
         layout.addWidget(group)
 
     def toggle_mean_line(self, state):
         self.mean_line.setVisible(state == Qt.Checked)
+    
+    def clear_console(self):
+        self.console.clear()
 
     def refresh_ports(self):
         self.port_combo.clear()
@@ -315,13 +331,11 @@ class ADS1256Interface(QMainWindow):
         if line == "START_DATA":
             self.is_receiving_samples = True
             self.raw_sample_data = ""
-            # --- MODIFICATION: Réinitialisation de la liste d'offsets ---
             self.offsets = []
             return
 
         if self.is_receiving_samples:
-            # --- MODIFICATION: Capture de tous les offsets ---
-            if line.startswith("OFFSET"): # Capture OFFSET, OFFSET1, OFFSET2, etc.
+            if line.startswith("OFFSET"):
                 self.offsets.append(int(line.split(':')[1]))
             elif line == "END_DATA":
                 self.is_receiving_samples = False
@@ -336,19 +350,23 @@ class ADS1256Interface(QMainWindow):
                 if self.command_queue:
                     self.send_next_command()
                 else:
-                    self.is_applying_settings = False
-                    self.set_ui_for_ready_state(True)
-                    self.status_label.setText("ESP32 Prêt. Paramètres appliqués.")
+                    self.status_label.setText("Paramètres appliqués. Finalisation...")
+                    QTimer.singleShot(1000, self.finalize_settings_application)
             else:
                 self.set_ui_for_ready_state(True)
                 self.status_label.setText("ESP32 Prêt.")
+
+    def finalize_settings_application(self):
+        """Finalise le processus d'application des paramètres après le délai."""
+        self.is_applying_settings = False
+        self.set_ui_for_ready_state(True)
+        self.status_label.setText("ESP32 Prêt. Paramètres appliqués.")
 
     def process_and_plot_samples(self):
         try:
             samples_str = self.raw_sample_data.split(',')
             raw_samples = np.array([int(s) for s in samples_str if s])
             
-            # --- MODIFICATION: Calcul de l'offset final ---
             if not self.offsets:
                 raise ValueError("Aucune valeur d'offset reçue.")
             final_offset = np.mean(self.offsets)
@@ -375,13 +393,13 @@ class ADS1256Interface(QMainWindow):
             self.plot_widget.setYRange(mean_voltage - max_deviation - padding, mean_voltage + max_deviation + padding)
             self.plot_widget.setXRange(0, 2, padding=0)
 
+            self.mean_value_label.setText(f"({mean_voltage:.4f} V)")
             self.mean_line.setPos(mean_voltage)
 
         except (ValueError, IndexError) as e:
             self.status_label.setText(f"Erreur de traitement des données: {e}")
             print(f"Error processing data: {e}")
             
-    # ... (le reste du fichier : send_command, send_raw_command, send_next_command, apply_settings, etc. reste inchangé) ...
     def send_command(self, cmd):
         if self.serial_port and self.serial_port.is_open:
             self.set_ui_for_ready_state(False)
@@ -414,6 +432,9 @@ class ADS1256Interface(QMainWindow):
         buffer_cmd = f"BUFFER:{buffer_state}"
         self.command_queue.append(buffer_cmd)
 
+        if self.calibration_check.isChecked():
+            self.command_queue.append("CAL:SELF")
+
         self.is_applying_settings = True
         self.set_ui_for_ready_state(False)
         self.send_next_command()
@@ -421,11 +442,11 @@ class ADS1256Interface(QMainWindow):
     def clear_graph(self):
         self.waveform_plot.clear()
         self.mean_line.setVisible(False)
+        self.mean_value_label.setText("")
 
     def set_ui_for_ready_state(self, is_ready):
         self.ac_measure_btn.setEnabled(is_ready)
         self.apply_settings_btn.setEnabled(is_ready)
-        self.cal_btn.setEnabled(is_ready)
         self.reset_btn.setEnabled(is_ready)
 
     def closeEvent(self, event):
