@@ -1,5 +1,5 @@
 # energy_monitor_pyqt.py
-# Version: 3.4.0
+# Version: 3.6.2
 
 import sys
 import serial
@@ -17,11 +17,7 @@ import qdarkstyle
 from collections import deque
 import struct
 
-# =================== MODIFICATION START ===================
-# CHANGEMENT DE VERSION: Passage à 3.4.0 pour refléter l'ajout
-# du compte à rebours dynamique.
-VERSION = "3.4.0"
-# =================== MODIFICATION END ===================
+VERSION = "3.6.2"
 VREF_VOLTS = 2.5
 ADS1256_MAX_VALUE = 8388607.0
 
@@ -35,15 +31,23 @@ class SerialReader(QThread):
         self._is_running = True
         self.is_binary_mode = False
         self.bytes_to_read = 0
+        self.binary_buffer = bytearray()
 
     def run(self):
         while self._is_running and self.serial_instance and self.serial_instance.is_open:
             try:
                 if self.is_binary_mode:
-                    if self.serial_instance.in_waiting >= self.bytes_to_read:
-                        binary_data = self.serial_instance.read(self.bytes_to_read)
-                        self.binary_data_received.emit(binary_data)
-                        self.is_binary_mode = False
+                    if self.serial_instance.in_waiting > 0:
+                        data = self.serial_instance.read(self.serial_instance.in_waiting)
+                        self.binary_buffer.extend(data)
+                        
+                        if len(self.binary_buffer) >= self.bytes_to_read:
+                            # =================== MODIFICATION START ===================
+                            # CORRECTION: Convertir le bytearray en bytes avant d'émettre
+                            self.binary_data_received.emit(bytes(self.binary_buffer))
+                            # =================== MODIFICATION END ===================
+                            self.is_binary_mode = False
+                            self.binary_buffer.clear()
                 else:
                     if self.serial_instance.in_waiting > 0:
                         line = self.serial_instance.readline().decode('utf-8', errors='ignore').strip()
@@ -52,10 +56,14 @@ class SerialReader(QThread):
             except serial.SerialException as e:
                 print(f"Serial read error: {e}")
                 break
+            except Exception as e:
+                # Afficher l'erreur dans la console pour un meilleur débogage
+                print(f"Error in SerialReader: {e}")
             time.sleep(0.001)
 
     def start_binary_read(self, num_bytes):
         self.bytes_to_read = num_bytes
+        self.binary_buffer.clear()
         self.is_binary_mode = True
 
     def stop(self):
@@ -64,10 +72,7 @@ class SerialReader(QThread):
 class ADS1256Interface(QMainWindow):
     def __init__(self):
         super().__init__()
-        # =================== MODIFICATION START ===================
-        # MISE À JOUR DU TITRE DE LA FENÊTRE
         self.setWindowTitle(f"ADS1256 AC Waveform Analyzer - v{VERSION}")
-        # =================== MODIFICATION END ===================
         self.setGeometry(100, 100, 1400, 800)
 
         self.serial_port = None
@@ -75,32 +80,28 @@ class ADS1256Interface(QMainWindow):
         self.is_receiving_samples = False
         self.raw_sample_data = ""
         self.offsets = []
-        self.is_receiving_binary = False
-        self.binary_sample_count = 0
         self.command_queue = deque()
         self.is_applying_settings = False
-
         self.countdown_end_time = 0
         self.current_task = ""
+        self.current_sps = 1000.0
 
         self.init_ui()
         self.refresh_ports()
+        self.update_current_sps(self.datarate_combo.currentText())
+
 
     def init_ui(self):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QHBoxLayout(central_widget)
-
         main_splitter = QSplitter(Qt.Horizontal)
-
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(5, 5, 5, 5)
-
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
-
         self.right_splitter = QSplitter(Qt.Vertical)
 
         pg.setConfigOption('background', None)
@@ -125,20 +126,14 @@ class ADS1256Interface(QMainWindow):
         self.plot_widget.scene().sigMouseMoved.connect(self.on_mouse_move)
 
         self.right_splitter.addWidget(self.plot_widget)
-
         self.console = QTextEdit()
         self.console.setReadOnly(True)
-        self.console.setVisible(True)
         self.right_splitter.addWidget(self.console)
-
         right_layout.addWidget(self.right_splitter)
         self.right_splitter.setStretchFactor(0, 2)
-        self.right_splitter.setStretchFactor(1, 2)
+        self.right_splitter.setStretchFactor(1, 1)
 
-        # =================== MODIFICATION START ===================
-        # AFFICHAGE DE LA VERSION DANS L'UI
         left_layout.addWidget(QLabel(f"Version {VERSION}"))
-        # =================== MODIFICATION END ===================
         self.create_connection_group(left_layout)
         self.create_status_group(left_layout)
         self.create_settings_group(left_layout)
@@ -150,26 +145,24 @@ class ADS1256Interface(QMainWindow):
         main_splitter.addWidget(right_panel)
         main_splitter.setStretchFactor(0, 1)
         main_splitter.setStretchFactor(1, 4)
-
         main_layout.addWidget(main_splitter)
 
         self.countdown_timer = QTimer(self)
         self.countdown_timer.setInterval(100)
         self.countdown_timer.timeout.connect(self.update_countdown)
+        self.datarate_combo.currentTextChanged.connect(self.update_current_sps)
+
 
     def on_mouse_move(self, pos):
         if self.plot_widget.sceneBoundingRect().contains(pos):
             mouse_point = self.plot_widget.getPlotItem().vb.mapSceneToView(pos)
             x, y = mouse_point.x(), mouse_point.y()
-
             self.crosshair_v.setPos(x)
             self.crosshair_h.setPos(y)
-
             x_data, y_data = self.waveform_plot.getData()
             if x_data is not None and len(x_data) > 0:
                 index = np.abs(x_data - x).argmin()
                 px, py = x_data[index], y_data[index]
-
                 view_range = self.plot_widget.getPlotItem().vb.viewRange()
                 y_span = view_range[1][1] - view_range[1][0]
                 if abs(py - y) < y_span * 0.05:
@@ -209,14 +202,19 @@ class ADS1256Interface(QMainWindow):
         self.status_label.setWordWrap(True)
         self.status_label.setStyleSheet("color: #8be9fd;")
         vbox.addWidget(self.status_label)
-
         self.countdown_label = QLabel("")
         self.countdown_label.setStyleSheet("font-weight: bold; color: #ffb86c;")
         self.countdown_label.setVisible(False)
         vbox.addWidget(self.countdown_label)
-
         group.setLayout(vbox)
         layout.addWidget(group)
+
+    def update_current_sps(self, text):
+        try:
+            self.current_sps = float(text)
+        except ValueError:
+            print(f"Could not parse SPS value: {text}")
+            self.current_sps = 1000.0
 
     def create_settings_group(self, layout):
         group = QGroupBox("ADS Settings")
@@ -225,25 +223,20 @@ class ADS1256Interface(QMainWindow):
         self.gain_combo = QComboBox()
         self.gain_combo.addItems(["1", "2", "4", "8", "16", "32", "64"])
         grid.addWidget(self.gain_combo, 0, 1)
-
         grid.addWidget(QLabel("Data Rate (SPS):"), 1, 0)
         self.datarate_combo = QComboBox()
         self.datarate_combo.addItems(["30000", "15000", "7500", "3750", "2000", "1000", "500", "100", "60", "50", "30", "25", "15", "10", "5", "2.5"])
-        self.datarate_combo.setCurrentText("30000")
+        self.datarate_combo.setCurrentText("1000")
         grid.addWidget(self.datarate_combo, 1, 1)
-
         self.buffer_check = QCheckBox("Buffer ON")
         self.buffer_check.setChecked(True)
         grid.addWidget(self.buffer_check, 2, 0, 1, 2)
-        
-        self.calibration_check = QCheckBox("Calibration")
+        self.calibration_check = QCheckBox("Calibration on Apply")
         self.calibration_check.setChecked(True)
         grid.addWidget(self.calibration_check, 3, 0, 1, 2)
-
         self.apply_settings_btn = QPushButton("Apply Settings")
         self.apply_settings_btn.clicked.connect(self.apply_settings)
         grid.addWidget(self.apply_settings_btn, 4, 0, 1, 2)
-        
         group.setLayout(grid)
         layout.addWidget(group)
 
@@ -260,25 +253,20 @@ class ADS1256Interface(QMainWindow):
         mode_group.addWidget(self.mode_text_radio)
         mode_group.addWidget(self.mode_binary_radio)
         vbox.addLayout(mode_group)
-
         self.ac_measure_btn = QPushButton("Start Monitoring")
         self.ac_measure_btn.setStyleSheet("color: #50fa7b;")
         self.ac_measure_btn.setEnabled(False)
         self.ac_measure_btn.clicked.connect(self.request_ac_measurement)
         vbox.addWidget(self.ac_measure_btn)
-
         self.reset_btn = QPushButton("Reset ADS")
         self.reset_btn.clicked.connect(lambda: self.send_command("RESET"))
         vbox.addWidget(self.reset_btn)
-
         self.clear_graph_btn = QPushButton("Clear Graph")
         self.clear_graph_btn.clicked.connect(self.clear_graph)
         vbox.addWidget(self.clear_graph_btn)
-
         clear_console_btn = QPushButton("Clear Console")
         clear_console_btn.clicked.connect(self.clear_console)
         vbox.addWidget(clear_console_btn)
-
         group.setLayout(vbox)
         layout.addWidget(group)
 
@@ -289,20 +277,16 @@ class ADS1256Interface(QMainWindow):
         self.console_check.setChecked(True)
         self.console_check.stateChanged.connect(lambda state: self.console.setVisible(state == Qt.Checked))
         vbox.addWidget(self.console_check)
-
         mean_layout = QHBoxLayout()
         self.show_mean_check = QCheckBox("Show Mean Value")
         self.show_mean_check.setChecked(False)
         self.show_mean_check.stateChanged.connect(self.toggle_mean_line)
         mean_layout.addWidget(self.show_mean_check)
-
         self.mean_value_label = QLabel("")
         self.mean_value_label.setStyleSheet("color: #50fa7b;")
         mean_layout.addWidget(self.mean_value_label)
         mean_layout.addStretch()
-        
         vbox.addLayout(mean_layout)
-
         group.setLayout(vbox)
         layout.addWidget(group)
 
@@ -339,7 +323,7 @@ class ADS1256Interface(QMainWindow):
                 self.serial_thread.start()
                 self.connect_btn.setText("Disconnect")
                 self.led.setStyleSheet("color: #50fa7b; font-size: 24px;")
-                self.status_label.setText("Redémarrage de l'ESP requis...")
+                self.status_label.setText("Waiting for ESP32 to be ready...")
             except serial.SerialException as e:
                 QMessageBox.critical(self, "Connection Error", f"Failed to connect to {port}:\n{e}")
 
@@ -360,134 +344,110 @@ class ADS1256Interface(QMainWindow):
     def update_countdown(self):
         time_left = self.countdown_end_time - time.time()
         if time_left > 0:
-            self.countdown_label.setText(f"Temps restant: {time_left:.1f}s")
+            self.countdown_label.setText(f"Time left: {time_left:.1f}s")
         else:
-            self.countdown_label.setText("Temps restant: 0.0s")
+            self.countdown_label.setText("Time left: 0.0s")
             self.countdown_timer.stop()
             QTimer.singleShot(500, lambda: self.countdown_label.setVisible(False))
 
     def process_binary_data(self, data):
+        self.countdown_timer.stop()
+        self.countdown_label.setVisible(False)
         try:
             num_samples = len(data) // 4
             samples_tuple = struct.unpack(f'<{num_samples}i', data)
             raw_samples = np.array(samples_tuple)
             self.process_and_plot_samples(raw_samples)
         except struct.error as e:
-            self.status_label.setText(f"Erreur de décompression binaire: {e}")
+            self.status_label.setText(f"Binary unpack error: {e}")
         except Exception as e:
-            self.status_label.setText(f"Erreur de traitement binaire: {e}")
+            self.status_label.setText(f"Binary processing error: {e}")
 
     def process_serial_data(self, line):
         self.console.append(line)
 
         if line.startswith("TASK:"):
             self.current_task = line.split(':')[1]
-            if self.current_task == "OFFSET":
-                self.status_label.setText("Mesure de l'offset en cours...")
-            elif self.current_task == "SAMPLING":
-                self.status_label.setText("Mesure AC en cours...")
-            return
-
-        if line.startswith("DURATION:"):
+            self.status_label.setText(f"{self.current_task} in progress...")
+        elif line.startswith("DURATION:"):
             try:
-                duration_ms = int(line.split(':')[1])
-                self.start_countdown(duration_ms)
+                self.start_countdown(int(line.split(':')[1]))
             except (ValueError, IndexError):
-                print(f"Erreur de parsing de la durée: {line}")
-            return
-
-        if "waiting for download" in line or "Connecting..." in line:
-            self.set_ui_for_ready_state(False)
-            self.status_label.setText("Redémarrer l'ESP")
-            return
-
-        if line == "START_DATA":
+                print(f"Error parsing duration: {line}")
+        
+        elif line == "START_BINARY":
+            self.offsets = []
+        elif line.startswith("OFFSET:"):
+            self.offsets.append(int(line.split(':')[1]))
+        elif line.startswith("COUNT:"):
+            count = int(line.split(':')[1])
+            bytes_to_read = count * 4
+            self.status_label.setText(f"Receiving {count} samples ({bytes_to_read / 1024:.1f} KB)...")
+            if self.serial_thread:
+                self.serial_thread.start_binary_read(bytes_to_read)
+        
+        elif line == "START_DATA":
             self.is_receiving_samples = True
             self.raw_sample_data = ""
             self.offsets = []
-            return
-
-        if self.is_receiving_samples:
-            if line.startswith("OFFSET"):
-                self.offsets.append(int(line.split(':')[1]))
-            elif line == "END_DATA":
+        elif self.is_receiving_samples:
+            if line.startswith("END_DATA"):
                 self.is_receiving_samples = False
                 samples_str = self.raw_sample_data.split(',')
                 raw_samples = np.array([int(s) for s in samples_str if s])
                 self.process_and_plot_samples(raw_samples)
-                self.countdown_timer.stop()
-                self.countdown_label.setVisible(False)
             else:
                 self.raw_sample_data += line
-            return
 
-        if line == "START_BINARY":
-            self.is_receiving_binary = True
-            self.offsets = []
-            self.binary_sample_count = 0
-            self.status_label.setText("Réception de l'en-tête binaire...")
-            return
-
-        if self.is_receiving_binary:
-            if line.startswith("OFFSET:"):
-                self.offsets.append(int(line.split(':')[1]))
-            elif line.startswith("COUNT:"):
-                self.binary_sample_count = int(line.split(':')[1])
-                if self.binary_sample_count > 0:
-                    bytes_to_read = self.binary_sample_count * 4
-                    self.status_label.setText(f"Réception de {self.binary_sample_count} samples ({bytes_to_read} octets)...")
-                    self.serial_thread.start_binary_read(bytes_to_read)
-            elif line == "END_BINARY":
-                self.is_receiving_binary = False
-                self.countdown_timer.stop()
-                self.countdown_label.setVisible(False)
-            return
-
-        if "ESP32 Ready" in line:
+        elif "ESP32 Ready" in line:
             if self.is_applying_settings:
                 if self.command_queue:
                     self.send_next_command()
                 else:
-                    self.status_label.setText("Paramètres appliqués. Finalisation...")
-                    QTimer.singleShot(1000, self.finalize_settings_application)
+                    self.finalize_settings_application()
             else:
                 self.set_ui_for_ready_state(True)
-                self.status_label.setText("ESP32 Prêt.")
+                self.status_label.setText("ESP32 Ready.")
 
     def finalize_settings_application(self):
         self.is_applying_settings = False
         self.set_ui_for_ready_state(True)
-        self.status_label.setText("ESP32 Prêt. Paramètres appliqués.")
+        self.status_label.setText("ESP32 Ready. Settings applied.")
 
     def process_and_plot_samples(self, raw_samples):
         try:
             if raw_samples is None or len(raw_samples) == 0:
-                raise ValueError("Aucun échantillon à traiter.")
+                raise ValueError("No samples to process.")
             if not self.offsets:
-                raise ValueError("Aucune valeur d'offset reçue.")
+                self.offsets = [0] 
+
             final_offset = np.mean(self.offsets)
             gain = float(self.gain_combo.currentText())
             voltages = (raw_samples - final_offset) / ADS1256_MAX_VALUE * (VREF_VOLTS * 2.0) / gain
-            rms_raw = np.sqrt(np.mean(np.square(raw_samples.astype(np.float64) - final_offset)))
-            rms_voltage = (rms_raw / ADS1256_MAX_VALUE) * (VREF_VOLTS * 2.0) / gain
-            self.status_label.setText(f"Mesure terminée. Samples: {len(raw_samples)}. Tension RMS: {rms_voltage:.4f} V")
-            time_axis = np.linspace(0, 10, len(voltages))
+            
+            rms_voltage = np.sqrt(np.mean(np.square(voltages)))
+
+            self.status_label.setText(f"Measurement complete. Samples: {len(raw_samples)}. RMS Voltage: {rms_voltage:.4f} V")
+            
+            duration = len(raw_samples) / self.current_sps
+            time_axis = np.linspace(0, duration, len(voltages), endpoint=False)
+            
             self.waveform_plot.setData(time_axis, voltages)
             mean_voltage = np.mean(voltages)
             max_deviation = np.max(np.abs(voltages - mean_voltage))
-            padding = max_deviation * 0.05
+            padding = max_deviation * 0.1 if max_deviation > 0 else 0.1
             self.plot_widget.setYRange(mean_voltage - max_deviation - padding, mean_voltage + max_deviation + padding)
-            self.plot_widget.setXRange(0, 10 / len(voltages) * 100, padding=0)
+            self.plot_widget.setXRange(0, duration)
             self.mean_value_label.setText(f"({mean_voltage:.4f} V)")
             self.mean_line.setPos(mean_voltage)
-        except (ValueError, IndexError) as e:
-            self.status_label.setText(f"Erreur de traitement des données: {e}")
+        except (ValueError, IndexError, ZeroDivisionError) as e:
+            self.status_label.setText(f"Data processing error: {e}")
             print(f"Error processing data: {e}")
 
     def send_command(self, cmd):
         if self.serial_port and self.serial_port.is_open:
             self.set_ui_for_ready_state(False)
-            self.status_label.setText(f"Commande '{cmd}' envoyée...")
+            self.status_label.setText(f"Sending command '{cmd}'...")
             self.send_raw_command(cmd)
 
     def send_raw_command(self, cmd):
@@ -498,7 +458,7 @@ class ADS1256Interface(QMainWindow):
     def send_next_command(self):
         if self.command_queue:
             command = self.command_queue.popleft()
-            self.status_label.setText(f"Application de: '{command}'...")
+            self.status_label.setText(f"Applying: '{command}'...")
             self.send_raw_command(command)
         
     def apply_settings(self):
@@ -506,8 +466,7 @@ class ADS1256Interface(QMainWindow):
         gain_cmd = f"GAIN:{self.gain_combo.currentText()}"
         self.command_queue.append(gain_cmd)
         drate_text = self.datarate_combo.currentText()
-        sps_to_send = "2" if drate_text == "2.5" else drate_text
-        drate_cmd = f"DRATE:{sps_to_send}"
+        drate_cmd = f"DRATE:{drate_text}"
         self.command_queue.append(drate_cmd)
         buffer_state = "ON" if self.buffer_check.isChecked() else "OFF"
         buffer_cmd = f"BUFFER:{buffer_state}"

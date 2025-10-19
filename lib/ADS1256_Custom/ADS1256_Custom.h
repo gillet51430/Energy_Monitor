@@ -1,3 +1,4 @@
+// Version: 1.1.0
 #ifndef ADS1256_Custom_H
 #define ADS1256_Custom_H
 
@@ -79,14 +80,6 @@
 
 class ADS1256 {
 public:
-    /**
-     * @brief Constructeur de la classe ADS1256.
-     * @param cs_pin Pin de Chip Select (CS).
-     * @param drdy_pin Pin de Data Ready (DRDY), doit être compatible avec les interruptions.
-     * @param pdwn_pin Pin de Power Down (PDWN) ou RESET.
-     * @param vref_volts Tension de référence en Volts.
-     * @param spi Instance de l'objet SPI à utiliser (ex: SPI, VSPI).
-     */
     ADS1256(uint8_t cs_pin, uint8_t drdy_pin, uint8_t pdwn_pin, double vref_volts, SPIClass& spi);
 
     void begin();
@@ -99,6 +92,7 @@ public:
     void printAllRegisters();
 
     int32_t readRawData();
+    void readMultipleSamples(int32_t* buffer, uint32_t num_samples); // OPTIMISATION
     float convertToVoltage(int32_t rawData);
     void setPGA(uint8_t pga_gain_code);
     void setBuffer(bool enable);
@@ -107,38 +101,23 @@ public:
 
     void differentialChannelValue(uint8_t channelN, uint8_t channelP);
 
-    void startContinuousConversion();
-    void stopContinuousConversion();
-    int32_t readContinuousData_LSB();
-
 private:
-    // --- Broches et configuration ---
     uint8_t _cs_pin;
     uint8_t _drdy_pin;
     uint8_t _pdwn_pin;
     double _vref_volts;
     SPIClass& _spi;
 
-    uint8_t _current_pga_gain_code;     // Stores the current PGA setting code (e.g., ADS1256_ADCON_PGA_1)
-    double _current_pga_gain_value;     // Stores the actual gain value (e.g., 1.0, 2.0, 4.0)
-
-    /**
-     * @brief Indicateur de donnée prête.
-     * 'volatile' est CRUCIAL pour que le compilateur ne fasse pas d'optimisations
-     * incorrectes, car cette variable est modifiée dans une interruption (ISR).
-     */
+    uint8_t _current_pga_gain_code;
+    double _current_pga_gain_value;
     volatile bool _dataReady;
 
-    /**
-     * @brief La fonction d'interruption (ISR).
-     * Doit être 'static' pour être utilisée avec attachInterruptArg.
-     * IRAM_ATTR est une optimisation pour ESP32.
-     * @param arg Pointeur vers l'instance de la classe ('this').
-     */
     static void IRAM_ATTR checkDReady_ISR(void* arg);
     
     void waitForDRDY();
     void updatePGAGainValue();
+    void startContinuousConversion();
+    void stopContinuousConversion();
 };
 
 #endif // ADS1256_CUSTOM_H
