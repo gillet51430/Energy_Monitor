@@ -140,10 +140,9 @@ int32_t ADS1256::readRawData() {
   return (int32_t)result;
 }
 
-// =================== MODIFICATION START ===================
-// NOUVELLE FONCTION OPTIMISÉE
-void ADS1256::readMultipleSamples(int32_t* buffer, uint32_t num_samples) {
+void ADS1256::readMultipleSamples(int32_t* buffer, uint32_t num_samples, uint32_t* samples_time_us) {
     startContinuousConversion();
+    unsigned long timer = micros();
     for (uint32_t i = 0; i < num_samples; ++i) {
         waitForDRDY();
         
@@ -157,9 +156,9 @@ void ADS1256::readMultipleSamples(int32_t* buffer, uint32_t num_samples) {
         }
         buffer[i] = (int32_t)result;
     }
+    *samples_time_us = micros() - timer;
     stopContinuousConversion();
 }
-// =================== MODIFICATION END ===================
 
 float ADS1256::convertToVoltage(int32_t rawData) {
     return (float)rawData / ADS1256_MAX_VALUE * (_vref_volts * 2.0) / _current_pga_gain_value;
@@ -208,8 +207,6 @@ void ADS1256::differentialChannelValue(uint8_t channelN, uint8_t channelP) {
   }
 }
 
-// =================== MODIFICATION START ===================
-// Ces fonctions sont maintenant privées et optimisées
 void ADS1256::startContinuousConversion() {
     _spi.beginTransaction(SPISettings(SPI_SPEED, MSBFIRST, SPI_MODE1));
     digitalWrite(_cs_pin, LOW);
@@ -228,7 +225,6 @@ void ADS1256::stopContinuousConversion() {
     digitalWrite(_cs_pin, HIGH);
     _spi.endTransaction();
 }
-// =================== MODIFICATION END ===================
 
 String ADS1256::binaryToString(uint8_t val) {
   String result = "";

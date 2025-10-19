@@ -14,7 +14,7 @@
 
 // --- Paramètres de mesure ---
 #define VREF_VOLTS 2.5                             // Tension de référence précise de l'ADC
-#define MAINS_VOLTAGE 237.0                        // Tension du réseau électrique (Volts)
+#define MAINS_VOLTAGE 232.6                        // Tension du réseau électrique (Volts)
 #define CURRENT_SENSOR_RATIO 50.0                  // Ratio du SCT013-050 (50A / 1V)
 
 // Seuil en Ampères sous lequel on considère la lecture comme du bruit et on la force à 0.
@@ -22,16 +22,17 @@
 #define CURRENT_NOISE_THRESHOLD 0.05
 
 // --- Paramètres d'échantillonnage ---
-#define MAINS_FREQUENCY 50                         // Fréquence du réseau (Hz)
-#define SAMPLES_PER_CYCLE 600                      // Nombre d'échantillons par cycle de 50Hz (7500 SPS / 50 Hz = 150)
-#define NUM_CYCLES_TO_SAMPLE 5                    // Nombre de cycles à moyenner pour une lecture stable
-#define SAMPLE_COUNT (SAMPLES_PER_CYCLE * NUM_CYCLES_TO_SAMPLE) // Nombre total d'échantillons à lire
-#define SAMPLE_COUNT_OFFSET (SAMPLES_PER_CYCLE * 1) //  Nombre d'échantillons pour le calcul de l'offset (à lire rapidement)
+#define SAMPLES_PER_CYCLE 600                                     // Nombre d'échantillons par cycle de 50Hz (30000 SPS / 50 Hz = 600)
+#define NUM_CYCLES_TO_SAMPLE 25                                   // Nombre de cycles à moyenner pour une lecture stable
+#define SAMPLE_COUNT (SAMPLES_PER_CYCLE * NUM_CYCLES_TO_SAMPLE)   // Nombre total d'échantillons à lire
+#define SAMPLE_COUNT_OFFSET (SAMPLES_PER_CYCLE)                   // Nombre d'échantillons pour le calcul de l'offset (à lire rapidement)
 
 // --- Buffer pour les échantillons ---
 int32_t samples[SAMPLE_COUNT];
 
-float test = 0.0; // Variable de test modifiable via le moniteur série
+// --- Variables globales ---
+uint32_t sample_times_us = 0;   // Temps pris pour lire les échantillons
+float test = 0.0;               // Variable de test modifiable via le moniteur série
 
 // --- Initialisation de l'ADC ---
 SPIClass ADS1256_SPI(VSPI);
@@ -46,7 +47,7 @@ ADS1256 adc(CS_PIN, DRDY_PIN, PWDN_PIN, VREF_VOLTS, ADS1256_SPI);
  */
 int32_t calculate_offset() {
     long long sum = 0;
-    adc.readMultipleSamples(samples, SAMPLE_COUNT_OFFSET); // Lecture rapide de 500 points
+    adc.readMultipleSamples(samples, SAMPLE_COUNT_OFFSET, &sample_times_us); // Lecture rapide de 500 points
     for (int i = 0; i < SAMPLE_COUNT_OFFSET; i++) {
         sum += samples[i];
     }
@@ -77,7 +78,7 @@ void setup() {
     adc.reset();
 
     // Configuration des paramètres de l'ADC
-    adc.setDataRate(ADS1256_DRATE_30000SPS); // 30000 SPS
+    adc.setDataRate(ADS1256_DRATE_30000SPS);
     adc.setBuffer(true);
     adc.setPGA(ADS1256_ADCON_PGA_1);
     
@@ -103,7 +104,7 @@ void loop() {
 
     // 2. Acquérir les échantillons du signal de courant
     adc.differentialChannelValue(ADS1256_MUX_AIN3, ADS1256_MUX_AIN2);
-    adc.readMultipleSamples(samples, SAMPLE_COUNT);
+    adc.readMultipleSamples(samples, SAMPLE_COUNT, &sample_times_us);
 
     // 3. Calculer la somme des carrés des échantillons (en retirant l'offset)
     double sum_of_squares = 0;
@@ -136,5 +137,5 @@ void loop() {
     // 9. Afficher les résultats
     Serial.printf("Courant: %.3f A | Puissance Apparente: %.1f VA\n", rms_current, apparent_power);
 
-    delay(1000); // Attendre 2 secondes avant la prochaine mesure
+    // delay(1000); // Attendre 2 secondes avant la prochaine mesure
 }
