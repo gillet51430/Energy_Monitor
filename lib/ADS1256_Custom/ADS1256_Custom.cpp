@@ -160,7 +160,7 @@ void ADS1256::readMultipleSamples(int32_t* buffer, uint32_t num_samples, uint32_
     stopContinuousConversion();
 }
 
-float ADS1256::convertToVoltage(int32_t rawData) {
+float ADS1256::convertion(int32_t rawData) {
     return (float)rawData / ADS1256_MAX_VALUE * (_vref_volts * 2.0) / _current_pga_gain_value;
 }
 

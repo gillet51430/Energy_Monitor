@@ -93,7 +93,7 @@ public:
 
     int32_t readRawData();
     void readMultipleSamples(int32_t* buffer, uint32_t num_samples, uint32_t* samples_time_us);
-    float convertToVoltage(int32_t rawData);
+    float convertion(int32_t rawData);
     void setPGA(uint8_t pga_gain_code);
     void setBuffer(bool enable);
     void setAutoCalibration(bool enable);
